@@ -4,17 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strings"
-
-	"github.com/jetstack/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
-	"github.com/jetstack/cert-manager/pkg/acme/webhook/cmd"
-	cmmeta "github.com/jetstack/cert-manager/pkg/apis/meta/v1"
+	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
+	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"github.com/go-gandi/go-gandi"
+	"github.com/go-gandi/go-gandi/config"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"os"
+	"strings"
 )
 
 const (
@@ -24,6 +25,7 @@ const (
 var GroupName = os.Getenv("GROUP_NAME")
 
 func main() {
+	klog.InitFlags(nil)
 	if GroupName == "" {
 		panic("GROUP_NAME must be specified")
 	}
@@ -40,7 +42,7 @@ func main() {
 
 // gandiDNSProviderSolver implements the provider-specific logic needed to
 // 'present' an ACME challenge TXT record for your own DNS provider.
-// To do so, it must implement the `github.com/jetstack/cert-manager/pkg/acme/webhook.Solver`
+// To do so, it must implement the `github.com/cert-manager/cert-manager/pkg/acme/webhook.Solver`
 // interface.
 type gandiDNSProviderSolver struct {
 	client *kubernetes.Clientset
@@ -76,6 +78,13 @@ func (c *gandiDNSProviderSolver) Name() string {
 	return "gandi"
 }
 
+func extractRootAndSubDomain(fqdn string, entry string) (string, string, error) {
+	parts := strings.Split(strings.Trim(fqdn, "."), ".")
+	domain := parts[len(parts)-2] + "." + parts[len(parts)-1]
+
+	return domain, strings.Join(append([]string{strings.Trim(entry, ".")}, parts[0:len(parts)-2]...), "."), nil
+}
+
 // Present is responsible for actually presenting the DNS record with the
 // DNS provider.
 // This method should tolerate being called multiple times with the same value.
@@ -97,28 +106,37 @@ func (c *gandiDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 		return fmt.Errorf("unable to get API key: %v", err)
 	}
 
-	gandiClient := NewGandiClient(*apiKey)
+	clientcfg := &config.Config{
+		APIKey: *apiKey,
+		Debug:  false,
+		DryRun: false,
+	}
+	gandiClient := gandi.NewLiveDNSClient(*clientcfg)
 
 	entry, domain := c.getDomainAndEntry(ch)
 	klog.V(6).Infof("present for entry=%s, domain=%s", entry, domain)
 
-	present, err := gandiClient.HasTxtRecord(&domain, &entry)
+	root, subdomain, err := extractRootAndSubDomain(domain, entry)
 	if err != nil {
-		return fmt.Errorf("unable to check TXT record: %v", err)
+		return fmt.Errorf("unable to mange provided domain : %v", err)
 	}
 
-	if present {
-		err := gandiClient.UpdateTxtRecord(&domain, &entry, &ch.Key, GandiMinTtl)
-		if err != nil {
-			return fmt.Errorf("unable to change TXT record: %v", err)
-		}
-	} else {
-		err := gandiClient.CreateTxtRecord(&domain, &entry, &ch.Key, GandiMinTtl)
+	record, err := gandiClient.GetDomainRecordByNameAndType(root, subdomain, "TXT")
+	if err != nil {
+		klog.V(6).Infof("There is no entry of TXT matching, creating a new one for %s with value \"%s\"", subdomain+root, ch.Key)
+		_, err := gandiClient.CreateDomainRecord(root, subdomain, "TXT", GandiMinTtl, []string{ch.Key})
 		if err != nil {
 			return fmt.Errorf("unable to create TXT record: %v", err)
 		}
+	} else {
+		if strings.Join(record.RrsetValues, "") != "\""+ch.Key+"\"" {
+			klog.V(6).Infof("Current record exists for %s value is %s, new value will be \"%s\"", subdomain+root, strings.Join(record.RrsetValues, ""), ch.Key)
+			_, err := gandiClient.UpdateDomainRecordByNameAndType(root, subdomain, "TXT", GandiMinTtl, []string{ch.Key})
+			if err != nil {
+				return fmt.Errorf("unable to update TXT record: %v", err)
+			}
+		}
 	}
-
 	return nil
 }
 
@@ -134,28 +152,37 @@ func (c *gandiDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to load config: %v", err)
 	}
+
+	klog.V(6).Infof("decoded configuration %v", cfg)
 
 	apiKey, err := c.getApiKey(&cfg, ch.ResourceNamespace)
 	if err != nil {
 		return fmt.Errorf("unable to get API key: %v", err)
 	}
 
-	gandiClient := NewGandiClient(*apiKey)
+	clientcfg := &config.Config{
+		APIKey: *apiKey,
+		Debug:  true,
+		DryRun: false,
+	}
+	gandiClient := gandi.NewLiveDNSClient(*clientcfg)
 
 	entry, domain := c.getDomainAndEntry(ch)
 
-	present, err := gandiClient.HasTxtRecord(&domain, &entry)
+	root, subdomain, err := extractRootAndSubDomain(domain, entry)
 	if err != nil {
-		return fmt.Errorf("unable to check TXT record: %v", err)
+		return fmt.Errorf("unable to mange provided domain : %v", err)
 	}
 
-	if present {
-		klog.V(6).Infof("deleting entry=%s, domain=%s", entry, domain)
-		err := gandiClient.DeleteTxtRecord(&domain, &entry)
+	_, err = gandiClient.GetDomainRecordByNameAndType(root, subdomain, "TXT")
+	if err != nil {
+		klog.V(6).Infof("There is no entry of TXT matching, do nothing", subdomain+root, ch.Key)
+	} else {
+		err := gandiClient.DeleteDomainRecord(root, subdomain, "TXT")
 		if err != nil {
-			return fmt.Errorf("unable to remove TXT record: %v", err)
+			return fmt.Errorf("unable to delete TXT record: %v", err)
 		}
 	}
 
