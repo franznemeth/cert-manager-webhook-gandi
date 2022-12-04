@@ -4,10 +4,7 @@ metadata:
   name: {{ include "cert-manager-webhook-gandi.fullname" . }}
   namespace: {{ .Values.certManager.namespace | quote }}
   labels:
-    app: {{ include "cert-manager-webhook-gandi.name" . }}
-    chart: {{ include "cert-manager-webhook-gandi.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
+    {{- include "cert-manager-webhook-gandi.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -16,5 +13,4 @@ spec:
       protocol: TCP
       name: https
   selector:
-    app: {{ include "cert-manager-webhook-gandi.name" . }}
-    release: {{ .Release.Name }}
+    {{- include "cert-manager-webhook-gandi.selectorLabels" . | nindent 4 }}

@@ -1,40 +1,45 @@
-# ACME webhook for Gandi (cert-manager-webhook-gandi)
+# ACME webhook for Gandi (SINTEF fork)
+
 `cert-manager-webhook-gandi` is an ACME webhook for [cert-manager]. It provides an ACME (read: Let's Encrypt) webhook for [cert-manager], which allows to use a `DNS-01` challenge with [Gandi]. This allows to provide Let's Encrypt certificates to [Kubernetes] for service protocols other than HTTP and furthermore to request wildcard certificates. Internally it uses the [Gandi LiveDNS API] to communicate with Gandi.
+
+
+## What does the fork do?
+
+This repository is a fork of [bwolf/cert-manager-webhook-gandi] with the following changes:
+
+ - The dependencies have been updated to newer versions
+ - A few pending pull requests on the upstream repository have been merged
+ - The software container image is hosted on GitHub
+ - The Helm chart is hosted on GitHub
+ - Secret handled in the Helm Chart (SOPS is recommended to save the secrets).
+
+## Helm chart
+
+[Read the Helm chart documentation](charts/cert-manager-webhook-gandi/README.md).
+
+## DNS-01 challenge ?
 
 Quoting the [ACME DNS-01 challenge]:
 
 > This challenge asks you to prove that you control the DNS for your domain name by putting a specific value in a TXT record under that domain name. It is harder to configure than HTTP-01, but can work in scenarios that HTTP-01 can’t. It also allows you to issue wildcard certificates. After Let’s Encrypt gives your ACME client a token, your client will create a TXT record derived from that token and your account key, and put that record at _acme-challenge.<YOUR_DOMAIN>. Then Let’s Encrypt will query the DNS system for that record. If it finds a match, you can proceed to issue a certificate!
-
 
 ## Building
 Build the container image `cert-manager-webhook-gandi:latest`:
 
     make build
 
-
 ## Image
 Ready made images are hosted on Docker Hub ([image tags]). Use at your own risk:
 
-    bwolf/cert-manager-webhook-gandi
+    ghcr.io/sintef/cert-manager-webhook-gandi
 
 
 ### Release History
 Refer to the [CHANGELOG](CHANGELOG.md) file.
 
-
-## Compatibility
-This webhook has been tested with [cert-manager] v1.5.4 and Kubernetes v1.22.2 on `amd64`. In theory it should work on other hardware platforms as well but no steps have been taken to verify this. Please drop me a note if you had success.
-
-
 ## Testing with Minikube
-1. Build this webhook in Minikube:
 
-        minikube start --memory=4G --more-options
-        eval $(minikube docker-env)
-        make build
-        docker images | grep webhook
-
-2. Install [cert-manager] with [Helm]:
+1. Install [cert-manager] with [Helm]:
 
         helm repo add jetstack https://charts.jetstack.io
 
@@ -63,42 +68,14 @@ This webhook has been tested with [cert-manager] v1.5.4 and Kubernetes v1.22.2 o
             kubectl describe pods -n cert-manager | less
 
 
-3. Create the secret to keep the Gandi API key in the cert-manager namespace:
-
-        kubectl create secret generic gandi-credentials \
-            --namespace cert-manager --from-literal=api-token='<GANDI-API-KEY>'
-
-   *The `Secret` must reside in the same namespace as `cert-manager`.*
-
-4. Deploy this webhook (add `--dry-run` to try it and `--debug` to inspect the rendered manifests; Set `logLevel` to 6 for verbose logs):
+2. Deploy this webhook (add `--dry-run` to try it and `--debug` to inspect the rendered manifests; Set `logLevel` to 6 for verbose logs):
 
    *The `features.apiPriorityAndFairness` argument must be removed or set to `false` for Kubernetes older than 1.20.*
 
-        helm install cert-manager-webhook-gandi \
-            --namespace cert-manager \
-            --set features.apiPriorityAndFairness=true \
-            --set image.repository=cert-manager-webhook-gandi \
-            --set image.tag=latest \
-            --set logLevel=2 \
-            ./deploy/cert-manager-webhook-gandi
+        helm repo add cert-manager-webhook-gandi https://sintef.github.io/cert-manager-webhook-gandi
 
-   To deploy using the image from Docker Hub (for example using the `0.2.0` tag):
-
-        helm install cert-manager-webhook-gandi \
-            --namespace cert-manager \
-            --set features.apiPriorityAndFairness=true \
-            --set image.tag=0.2.0 \
-            --set logLevel=2 \
-            ./deploy/cert-manager-webhook-gandi
-
-   To deploy using the Helm repository (for example using the `v0.2.0` version):
-
-        helm install cert-manager-webhook-gandi \
-            --repo https://bwolf.github.io/cert-manager-webhook-gandi \
-            --version v0.2.0 \
-            --namespace cert-manager \
-            --set features.apiPriorityAndFairness=true \
-            --set logLevel=2
+        helm install cert-manager-webhook-gandi cert-manager-webhook-gandi/cert-manager-webhook-gandi \
+            --set gandiApiToken=<GANDI-API-KEY>
 
    Check the logs
 
@@ -163,20 +140,6 @@ This webhook has been tested with [cert-manager] v1.5.4 and Kubernetes v1.22.2 o
 10. Uninstalling cert-manager:
     This is out of scope here. Refer to the official [documentation][cert-manager-uninstall].
 
-
-## Development
-**Note**: If some tool (IDE or build process) fails resolving a dependency, it may be the cause that a indirect dependency uses `bzr` for versioning. In such a case it may help to put the `bzr` binary into `$PATH` or `$GOPATH/bin`.
-
-
-## Release process (automated with [GitHub actions](.github/workflows/main.yml))
-- Changes in the Go code result in the build of a Docker image and the release of a new Helm chart
-- Changes at Helm chart level only, result in the release of a new Chart without building a new Docker image
-- All other changes are pushed to master
-- All versions are to be documented in [CHANGELOG](CHANGELOG.md)
-
-**Note**: All changes to the Go code or Helm chart must go with a version tag `vX.X.X` to trigger the GitHub workflow
-
-**Note**: Any Helm chart release results in the creation of a [GitHub release](https://github.com/bwolf/cert-manager-webhook-gandi/releases)
 
 ## Conformance test
 Please note that the test is not a typical unit or integration test. Instead it invokes the web hook in a Kubernetes-like environment which asks the web hook to really call the DNS provider (.i.e. Gandi). It attempts to create an `TXT` entry like `cert-manager-dns01-tests.example.com`, verifies the presence of the entry via Google DNS. Finally it removes the entry by calling the cleanup method of web hook.

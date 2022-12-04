@@ -3,10 +3,7 @@ kind: APIService
 metadata:
   name: v1alpha1.{{ .Values.groupName }}
   labels:
-    app: {{ include "cert-manager-webhook-gandi.name" . }}
-    chart: {{ include "cert-manager-webhook-gandi.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
+    {{- include "cert-manager-webhook-gandi.labels" . | nindent 4 }}
   annotations:
     cert-manager.io/inject-ca-from: "{{ .Values.certManager.namespace }}/{{ include "cert-manager-webhook-gandi.servingCertificate" . }}"
 spec:

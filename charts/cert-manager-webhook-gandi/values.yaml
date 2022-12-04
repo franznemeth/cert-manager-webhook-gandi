@@ -1,0 +1,39 @@
+# -- "Group is the API group name this server hosts", if you find this description helful.
+groupName: acme.bwolf.me
+# -- Verbosity of the logs. Set to 6 for verbose logs.
+logLevel: 2
+certManager:
+  # -- Namespace of cert-manager
+  namespace: cert-manager
+  # -- Name of cert-manager's service account
+  serviceAccountName: cert-manager
+image:
+  # -- Image name
+  repository: ghcr.io/sintef/cert-manager-webhook-gandi
+  # -- Image tag (default to Chart's appVersion)
+  tag: ""
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+# -- Set to override the name
+nameOverride: ''
+# -- Set to override the fullname
+fullnameOverride: ''
+service:
+  # -- Service type, e.g. ClusterIP, NodePort, LoadBalancer
+  type: ClusterIP
+  # -- Service port
+  port: 443
+# -- Container port (in case you have restrictions on the listening port)
+containerport: 8443
+features:
+  # -- Disable if your Kubernetes cluster doesn't have API Priority and Fairness enabled.
+  # -- It is enabled by default since a while.
+  apiPriorityAndFairness: true
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# -- Gandi Secret API key
+# -- To not store it in plain text, use sops or similar.
+# -- The secret is not created if not set.
+gandiApiToken: ""
